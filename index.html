@@ -126,6 +126,7 @@
     .summary-bar { grid-template-columns: repeat(2, 1fr); }
   }
 </style>
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCqEd2jtkSBnsbIobJ_EfRK_wQ8pzyxbKY&libraries=geometry" async></script>
 </head>
 <body>
 
@@ -202,6 +203,7 @@
 
 <script>
 const DEPOT = { name: "Rebisco VN - Kho Vĩnh Tân", addr: "Đường số 32, Vĩnh Tân, Tân Uyên, Bình Dương, Vietnam", lat: null, lon: null };
+const GOOGLE_KEY = 'AIzaSyCqEd2jtkSBnsbIobJ_EfRK_wQ8pzyxbKY';
 const TRUCK_NAMES = "ABCDEFGHIJ".split("");
 let orders = [];
 
@@ -359,7 +361,7 @@ async function runOptimize() {
         } catch(e) {
           locs.push({ lat: null, lon: null, label: o.addr, order: o });
         }
-        await sleep(1100);
+        await sleep(200);
       }
     }
 
@@ -450,12 +452,29 @@ async function geocode(addr) {
 }
 
 async function osrmRoute(waypoints) {
-  const coords = waypoints.map(w => `${w.lon},${w.lat}`).join(';');
-  const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=false`;
-  const r = await fetch(url);
-  const d = await r.json();
-  if (d.code !== 'Ok') throw new Error('OSRM error');
-  return { distKm: d.routes[0].distance / 1000, timeMin: d.routes[0].duration / 60 };
+  if (waypoints.length < 2) throw new Error('Cần ít nhất 2 điểm');
+  return new Promise((resolve, reject) => {
+    const ds = new google.maps.DirectionsService();
+    const origin = new google.maps.LatLng(waypoints[0].lat, waypoints[0].lon);
+    const destination = new google.maps.LatLng(waypoints[waypoints.length-1].lat, waypoints[waypoints.length-1].lon);
+    const stops = waypoints.slice(1, -1).map(w => ({
+      location: new google.maps.LatLng(w.lat, w.lon),
+      stopover: true
+    }));
+    ds.route({
+      origin,
+      destination,
+      waypoints: stops,
+      travelMode: google.maps.TravelMode.DRIVING,
+      optimizeWaypoints: false
+    }, (result, status) => {
+      if (status !== 'OK') return reject(new Error('Google Directions: ' + status));
+      const legs = result.routes[0].legs;
+      const distKm = legs.reduce((s, l) => s + l.distance.value, 0) / 1000;
+      const timeMin = legs.reduce((s, l) => s + l.duration.value, 0) / 60;
+      resolve({ distKm, timeMin });
+    });
+  });
 }
 
 function nearestNeighbor(start, locs) {
@@ -487,10 +506,15 @@ function renderResult(trucks, deferred, returnThresh) {
   const totalKm = trucks.reduce((s,t) => s + (t.distKm||0), 0);
   const avgLF = trucks.reduce((s,t) => s + t.cbm, 0) / (trucks.length * parseFloat(document.getElementById('cfg-cbm').value)) * 100;
 
-  const gmapsLink = (truck) => {
+  const osmLink = (truck) => {
     if (!truck.sortedLocs || !truck.sortedLocs.length) return '#';
-    const pts = [DEPOT, ...truck.sortedLocs].map(p => `${p.lat},${p.lon}`).join('/');
-    return `https://www.google.com/maps/dir/${pts}`;
+    const allPts = [DEPOT, ...truck.sortedLocs];
+    const origin = `${DEPOT.lat},${DEPOT.lon}`;
+    const dest = `${allPts[allPts.length-1].lat},${allPts[allPts.length-1].lon}`;
+    const stops = allPts.slice(1, -1).map(p => `${p.lat},${p.lon}`).join('|');
+    let url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}&travelmode=driving`;
+    if (stops) url += `&waypoints=${stops}`;
+    return url;
   };
 
   const lfColor = (pct) => pct >= 80 ? 'good' : pct >= 60 ? 'warn' : 'low';
@@ -578,7 +602,7 @@ function renderResult(trucks, deferred, returnThresh) {
             ${t.distKm ? `<div class="km-badge">
               🗺️ Tổng km: <strong>${t.distKm.toFixed(1)} km</strong>
               ${hasReturn ? `<span style="font-size:11px;opacity:0.8;">(gồm ${t.returnKm.toFixed(1)} km về kho vì >${returnThresh}km)</span>` : ''}
-              <a href="${gmapsLink(t)}" target="_blank" style="margin-left:auto;font-size:11px;color:var(--blue);">Xem bản đồ ↗</a>
+              <a href="${osmLink(t)}" target="_blank" style="margin-left:auto;font-size:11px;color:var(--blue);">Xem bản đồ ↗</a>
             </div>` : `<div class="km-badge" style="background:var(--red-light);color:var(--red);">⚠️ Không tính được km (geocode lỗi)</div>`}
           </div>
         </div>`;
@@ -679,12 +703,29 @@ async function geocode(addr) {
 }
 
 async function osrmRoute(waypoints) {
-  const coords = waypoints.map(w => `${w.lon},${w.lat}`).join(';');
-  const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=false`;
-  const r = await fetch(url);
-  const d = await r.json();
-  if (d.code !== 'Ok') throw new Error('OSRM error');
-  return { distKm: d.routes[0].distance / 1000, timeMin: d.routes[0].duration / 60 };
+  if (waypoints.length < 2) throw new Error('Cần ít nhất 2 điểm');
+  return new Promise((resolve, reject) => {
+    const ds = new google.maps.DirectionsService();
+    const origin = new google.maps.LatLng(waypoints[0].lat, waypoints[0].lon);
+    const destination = new google.maps.LatLng(waypoints[waypoints.length-1].lat, waypoints[waypoints.length-1].lon);
+    const stops = waypoints.slice(1, -1).map(w => ({
+      location: new google.maps.LatLng(w.lat, w.lon),
+      stopover: true
+    }));
+    ds.route({
+      origin,
+      destination,
+      waypoints: stops,
+      travelMode: google.maps.TravelMode.DRIVING,
+      optimizeWaypoints: false
+    }, (result, status) => {
+      if (status !== 'OK') return reject(new Error('Google Directions: ' + status));
+      const legs = result.routes[0].legs;
+      const distKm = legs.reduce((s, l) => s + l.distance.value, 0) / 1000;
+      const timeMin = legs.reduce((s, l) => s + l.duration.value, 0) / 60;
+      resolve({ distKm, timeMin });
+    });
+  });
 }
 
 function nearestNeighbor(start, locs) {
@@ -716,10 +757,15 @@ function renderResult(trucks, deferred, returnThresh) {
   const totalKm = trucks.reduce((s,t) => s + (t.distKm||0), 0);
   const avgLF = trucks.reduce((s,t) => s + t.cbm, 0) / (trucks.length * parseFloat(document.getElementById('cfg-cbm').value)) * 100;
 
-  const gmapsLink = (truck) => {
+  const osmLink = (truck) => {
     if (!truck.sortedLocs || !truck.sortedLocs.length) return '#';
-    const pts = [DEPOT, ...truck.sortedLocs].map(p => `${p.lat},${p.lon}`).join('/');
-    return `https://www.google.com/maps/dir/${pts}`;
+    const allPts = [DEPOT, ...truck.sortedLocs];
+    const origin = `${DEPOT.lat},${DEPOT.lon}`;
+    const dest = `${allPts[allPts.length-1].lat},${allPts[allPts.length-1].lon}`;
+    const stops = allPts.slice(1, -1).map(p => `${p.lat},${p.lon}`).join('|');
+    let url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}&travelmode=driving`;
+    if (stops) url += `&waypoints=${stops}`;
+    return url;
   };
 
   const lfColor = (pct) => pct >= 80 ? 'good' : pct >= 60 ? 'warn' : 'low';
@@ -807,7 +853,7 @@ function renderResult(trucks, deferred, returnThresh) {
             ${t.distKm ? `<div class="km-badge">
               🗺️ Tổng km: <strong>${t.distKm.toFixed(1)} km</strong>
               ${hasReturn ? `<span style="font-size:11px;opacity:0.8;">(gồm ${t.returnKm.toFixed(1)} km về kho vì >${returnThresh}km)</span>` : ''}
-              <a href="${gmapsLink(t)}" target="_blank" style="margin-left:auto;font-size:11px;color:var(--blue);">Xem bản đồ ↗</a>
+              <a href="${osmLink(t)}" target="_blank" style="margin-left:auto;font-size:11px;color:var(--blue);">Xem bản đồ ↗</a>
             </div>` : `<div class="km-badge" style="background:var(--red-light);color:var(--red);">⚠️ Không tính được km (geocode lỗi)</div>`}
           </div>
         </div>`;
