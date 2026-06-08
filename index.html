@@ -171,12 +171,7 @@
           <input type="number" id="cfg-return" value="85" step="5">
         </div>
       </div>
-      <div class="config-row">
-        <div class="config-item">
-          <label>Geoapify API Key</label>
-          <input type="text" id="cfg-apikey" value="1acc4e4037a34f31a5d11c1efd60e773" style="font-size:11px;">
-        </div>
-      </div>
+
 
       <button class="btn btn-primary" id="run-btn" onclick="runOptimize()" disabled>
         🚀 Tối ưu tuyến đường
@@ -345,7 +340,7 @@ async function runOptimize() {
       } catch(e) {
         locs.push({ lat: null, lon: null, label: o.addr, order: o });
       }
-      await sleep(300); // Geoapify rate limit
+      await sleep(1100); // Nominatim rate limit
     }
 
     // nearest neighbor sort from depot
@@ -427,15 +422,11 @@ function packOrders(split, MAX_CBM, MAX_KGS) {
 
 // ── GEO ────────────────────────────────────────────────────────
 async function geocode(addr) {
-  const apiKey = document.getElementById('cfg-apikey').value.trim();
-  const url = `https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(addr)}&apiKey=${apiKey}&lang=vi&limit=1`;
-  const r = await fetch(url);
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(addr)}&format=json&limit=1&countrycodes=vn`;
+  const r = await fetch(url, { headers: { 'Accept-Language': 'vi', 'User-Agent': 'RebiscoRouteOpt/1.0' } });
   const d = await r.json();
-  if (!d.features || !d.features.length) throw new Error('Không geocode được: ' + addr);
-  const [lon, lat] = d.features[0].geometry.coordinates;
-  const props = d.features[0].properties;
-  const label = [props.street, props.district, props.city].filter(Boolean).join(', ');
-  return { lat, lon, label };
+  if (!d.length) throw new Error('Không geocode được: ' + addr);
+  return { lat: parseFloat(d[0].lat), lon: parseFloat(d[0].lon), label: d[0].display_name.split(',').slice(0,3).join(',') };
 }
 
 async function osrmRoute(waypoints) {
